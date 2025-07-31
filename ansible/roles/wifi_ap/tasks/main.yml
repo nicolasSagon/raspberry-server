@@ -1,0 +1,69 @@
+- name: Remove the systemd service file for rfkill (cleanup)
+  file:
+    path: /etc/systemd/system/rfkill-unblock.service
+    state: absent
+  register: service_file_deleted
+
+- name: Reload systemd daemon if service file was removed
+  systemd:
+    daemon_reload: yes
+  when: service_file_deleted.changed
+
+- name: Ensure Wi-Fi is unblocked on boot via rc.local
+  copy:
+    dest: /etc/rc.local
+    mode: '0755'
+    content: |
+      #!/bin/sh -e
+      rfkill unblock wifi
+      exit 0
+
+
+
+- name: Configure hostapd
+  copy:
+    dest: /etc/hostapd/hostapd.conf
+    content: |
+      interface=wlan0
+      driver=nl80211
+      ssid={{ wifi_ssid }}
+      hw_mode=g
+      channel=7
+      wmm_enabled=0
+      macaddr_acl=0
+      auth_algs=1
+      ignore_broadcast_ssid=0
+      wpa=2
+      wpa_passphrase={{ wifi_passphrase }}
+      wpa_key_mgmt=WPA-PSK
+      rsn_pairwise=CCMP
+
+- name: Set hostapd default config path
+  lineinfile:
+    path: /etc/default/hostapd
+    regexp: '^#?DAEMON_CONF='
+    line: 'DAEMON_CONF="/etc/hostapd/hostapd.conf"'
+
+- name: Unmask hostapd service
+  command: systemctl unmask hostapd
+
+- name: Enable hostapd
+  systemd:
+    name: hostapd
+    enabled: yes
+    state: started
+
+- name: Configure dnsmasq
+  copy:
+    dest: /etc/dnsmasq.conf
+    content: |
+      interface=wlan0
+      dhcp-range=10.0.0.10,10.0.0.100,12h
+      domain=wlan
+      address=/gw.wlan/10.0.0.1
+
+- name: Restart dnsmasq
+  systemd:
+    name: dnsmasq
+    enabled: yes
+    state: restarted

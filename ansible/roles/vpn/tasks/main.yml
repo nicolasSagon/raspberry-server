@@ -1,0 +1,23 @@
+- name: Create NordVPN config dir
+  file:
+    path: /etc/openvpn
+    state: directory
+
+- name: Upload NordVPN config
+  copy:
+    src: nordvpn.ovpn
+    dest: /etc/openvpn/nordvpn.conf
+
+- name: Add credentials
+  copy:
+    dest: /etc/openvpn/nordvpn/credentials
+    content: |
+      {{ vpn_username }}
+      {{ vpn_password }}
+    mode: '0600'
+
+- name: Enable VPN
+  systemd:
+    name: openvpn@client
+    enabled: yes
+    state: started

@@ -1,0 +1,47 @@
+- name: Update APT cache
+  apt:
+    update_cache: yes
+
+- name: Upgrade all packages
+  apt:
+    upgrade: dist
+
+- name: Install base packages
+  apt:
+    name:
+      - curl
+      - git
+      - vim
+      - unzip
+      - net-tools
+      - openvpn
+      - iptables
+      - iptables-persistent
+      - hostapd
+      - dnsmasq
+      - wireless-tools
+      - dhcpcd5
+    state: present
+
+- name: Create a unified dhcpcd.conf for all interfaces
+  copy:
+    dest: /etc/dhcpcd.conf
+    mode: '0644'
+    content: |
+      # Global settings
+      persistent
+      option rapid_commit
+      option domain_name_servers, domain_name, domain_search, host_name
+      require dhcp_server_identifier
+      slaac private
+
+      # Static IP configuration for eth0 (WAN)
+      interface eth0
+      static ip_address=192.168.1.1/24
+      static routers=192.168.1.254
+      static domain_name_servers=8.8.8.8 1.1.1.1
+
+      # Static IP configuration for wlan0 (AP)
+      interface wlan0
+      static ip_address=10.0.0.1/24
+      nohook wpa_supplicant

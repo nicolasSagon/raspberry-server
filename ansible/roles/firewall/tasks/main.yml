@@ -1,0 +1,27 @@
+- name: Enable IP forwarding
+  sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    state: present
+    sysctl_set: yes
+    reload: yes
+
+- name: Set iptables rules
+  copy:
+    dest: /etc/iptables/rules.v4
+    content: |
+      *nat
+      :POSTROUTING ACCEPT [0:0]
+      -A POSTROUTING -o tun0 -j MASQUERADE
+      COMMIT
+
+      *filter
+      :INPUT ACCEPT [0:0]
+      :FORWARD ACCEPT [0:0]
+      :OUTPUT ACCEPT [0:0]
+      -A FORWARD -i wlan0 -o tun0 -j ACCEPT
+      -A FORWARD -i tun0 -o wlan0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+      COMMIT
+
+- name: Reload iptables
+  shell: iptables-restore < /etc/iptables/rules.v4

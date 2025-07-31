@@ -1,0 +1,9 @@
+- hosts: rpi
+  become: true
+  vars_files:
+    - vars/secrets.yml
+  roles:
+    - base
+    - wifi_ap
+    - vpn
+    - firewall
