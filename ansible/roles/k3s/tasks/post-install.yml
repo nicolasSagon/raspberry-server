@@ -1,0 +1,131 @@
+---
+# Post-installation tasks for K3s
+# Useful for setting up additional resources for Pulumi deployments
+
+- name: Create development namespace
+  k8s:
+    name: development
+    api_version: v1
+    kind: Namespace
+    state: present
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+
+- name: Create production namespace  
+  k8s:
+    name: production
+    api_version: v1
+    kind: Namespace
+    state: present
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+
+- name: Create monitoring namespace
+  k8s:
+    name: monitoring
+    api_version: v1
+    kind: Namespace
+    state: present
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+
+- name: Install metrics-server for resource monitoring
+  k8s:
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: metrics-server
+        namespace: kube-system
+        labels:
+          k8s-app: metrics-server
+      spec:
+        selector:
+          matchLabels:
+            k8s-app: metrics-server
+        template:
+          metadata:
+            labels:
+              k8s-app: metrics-server
+          spec:
+            containers:
+            - name: metrics-server
+              image: k8s.gcr.io/metrics-server/metrics-server:v0.6.4
+              args:
+              - --cert-dir=/tmp
+              - --secure-port=4443
+              - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+              - --kubelet-use-node-status-port
+              - --metric-resolution=15s
+              - --kubelet-insecure-tls
+              ports:
+              - name: main-port
+                containerPort: 4443
+                protocol: TCP
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+
+- name: Create service for metrics-server
+  k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: metrics-server
+        namespace: kube-system
+        labels:
+          kubernetes.io/name: "Metrics-server"
+          kubernetes.io/cluster-service: "true"
+      spec:
+        selector:
+          k8s-app: metrics-server
+        ports:
+        - port: 443
+          protocol: TCP
+          targetPort: main-port
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+
+- name: Generate kubeconfig for external access (Pulumi)
+  copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: /home/{{ ansible_user }}/k3s-external.yaml
+    remote_src: yes
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0600'
+
+- name: Update external kubeconfig with correct server address
+  replace:
+    path: /home/{{ ansible_user }}/k3s-external.yaml
+    regexp: 'https://127.0.0.1:6443'
+    replace: 'https://10.0.0.1:6443'
+
+- name: Display connection information for Pulumi
+  debug:
+    msg: |
+      🎉 K3s cluster is ready for Pulumi deployments!
+      
+      📋 Connection Details:
+      ┌─────────────────────────────────────────────────────┐
+      │ API Server: https://10.0.0.1:6443                  │
+      │ Access: VPN network only (10.0.0.0/24)             │
+      │ Kubeconfig: /home/{{ ansible_user }}/k3s-external.yaml         │
+      └─────────────────────────────────────────────────────┘
+      
+      🔐 Security:
+      ✅ Accessible from VPN network (10.0.0.0/24)
+      ❌ Blocked from domestic network (192.168.1.0/24)
+      
+      📁 Available Namespaces:
+      - pulumi-system (for Pulumi resources)
+      - development
+      - production  
+      - monitoring
+      
+      🛠 For Pulumi setup:
+      1. Copy kubeconfig: scp {{ ansible_user }}@10.0.0.1:k3s-external.yaml ~/.kube/config-rpi
+      2. Set environment: export KUBECONFIG=~/.kube/config-rpi
+      3. Test connection: kubectl get nodes
+      
+      💡 Useful commands on Pi:
+      - kubectl get nodes -o wide
+      - kubectl get pods --all-namespaces
+      - kubectl top nodes (after metrics-server is ready)

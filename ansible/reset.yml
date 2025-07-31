@@ -1,0 +1,110 @@
+---
+# Reset playbook for Raspberry Pi VPN AP + K3s
+# This will reset the entire configuration
+
+- hosts: rpi
+  become: true
+  tasks:
+    - name: Stop all services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop:
+        - k3s
+        - hostapd
+        - dnsmasq
+        - openvpn@nordvpn
+      ignore_errors: yes
+
+    - name: Reset K3s cluster
+      shell: |
+        if [ -f /usr/local/bin/k3s-uninstall.sh ]; then
+          /usr/local/bin/k3s-uninstall.sh
+        fi
+      ignore_errors: yes
+
+    - name: Remove K3s directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/rancher
+        - /var/lib/rancher
+        - /var/lib/kubelet
+        - /usr/local/bin/k3s
+        - /usr/local/bin/k3s-manage
+
+    - name: Remove kubeconfig files
+      shell: |
+        rm -rf /home/*/k3s-external.yaml
+        rm -rf /home/*/.kube/
+        rm -rf /root/.kube/
+      ignore_errors: yes
+
+    - name: Reset network configuration
+      copy:
+        dest: /etc/dhcpcd.conf
+        content: |
+          # Default dhcpcd configuration
+          hostname
+          clientid
+          persistent
+          option rapid_commit
+          option domain_name_servers, domain_name, domain_search, host_name
+          option classless_static_routes
+          option interface_mtu
+          require dhcp_server_identifier
+          slaac private
+
+    - name: Remove hostapd configuration
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/hostapd/hostapd.conf
+        - /etc/dnsmasq.conf
+
+    - name: Reset iptables
+      copy:
+        dest: /etc/iptables/rules.v4
+        content: |
+          *filter
+          :INPUT ACCEPT [0:0]
+          :FORWARD ACCEPT [0:0]
+          :OUTPUT ACCEPT [0:0]
+          COMMIT
+
+    - name: Reload iptables
+      shell: iptables-restore < /etc/iptables/rules.v4
+
+    - name: Remove VPN configuration
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/openvpn/nordvpn.conf
+        - /etc/openvpn/nordvpn
+
+    - name: Restart networking
+      systemd:
+        name: networking
+        state: restarted
+
+    - name: Reboot system
+      reboot:
+        reboot_timeout: 300
+
+    - name: Display reset complete message
+      debug:
+        msg: |
+          🧼 System reset complete!
+          
+          The Raspberry Pi has been restored to its base configuration.
+          - VPN configuration removed
+          - Wi-Fi AP configuration removed  
+          - K3s cluster uninstalled
+          - Network settings reset
+          - Firewall rules reset
+          
+          You can now re-run the main playbook to reinstall everything.

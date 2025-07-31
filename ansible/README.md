@@ -96,7 +96,7 @@ Tu peux éditer `group_vars/all.yml` :
 ## ▶️ Étape 6 : Lancer le déploiement
 
 ```bash
-ansible-playbook -i inventory/hosts playbook.yml
+ansible-playbook -i inventory/hosts playbook.yml 
 ```
 
 ---
@@ -106,6 +106,11 @@ ansible-playbook -i inventory/hosts playbook.yml
 - Un réseau Wi-Fi nommé `VPN-AccessPoint`
 - Tous les clients connectés passent par **NordVPN**
 - Le Pi reste accessible en SSH via Ethernet (`rpi5.local`)
+- **Cluster Kubernetes K3s** configuré et sécurisé :
+  - API Server : `https://10.0.0.1:6443`
+  - Accessible uniquement depuis le réseau VPN (`10.0.0.0/24`)
+  - Bloqué depuis le réseau domestique (`192.168.1.0/24`)
+  - Prêt pour les déploiements **Pulumi**
 
 ---
 
@@ -141,6 +146,59 @@ Sur le Pi lui-même :
 ```bash
 systemctl status openvpn-client@nordvpn
 ```
+
+### 🚢 K3s Kubernetes Cluster
+
+Le cluster K3s est maintenant configuré et sécurisé :
+
+```bash
+# Vérifier le statut du cluster
+kubectl get nodes
+kubectl get pods --all-namespaces
+
+# Utiliser le script de gestion
+k3s-manage status
+k3s-manage logs
+```
+
+#### 🔗 Connexion depuis Pulumi
+
+Pour connecter Pulumi à ton cluster K3s :
+
+1. **Récupérer le kubeconfig** :
+   ```bash
+   scp pi@10.0.0.1:k3s-external.yaml ~/.kube/config-rpi
+   export KUBECONFIG=~/.kube/config-rpi
+   ```
+
+2. **Tester la connexion** :
+   ```bash
+   kubectl get nodes
+   # ➜ doit afficher ton Raspberry Pi
+   ```
+
+3. **Utiliser avec Pulumi** :
+   ```python
+   import pulumi_kubernetes as k8s
+   
+   k8s_provider = k8s.Provider(
+       "rpi-k3s",
+       kubeconfig="~/.kube/config-rpi"
+   )
+   ```
+
+#### 🔒 Sécurité K3s
+
+- ✅ **API Server accessible uniquement depuis le VPN** (`10.0.0.0/24`)
+- ❌ **Bloqué depuis le réseau domestique** (`192.168.1.0/24`)  
+- 🔧 **Ports sécurisés** : 6443 (API), 10250 (Kubelet), 30000-32767 (NodePort)
+
+#### 📁 Namespaces disponibles
+
+- `pulumi-system` - Pour les ressources Pulumi
+- `development` - Environnement de développement
+- `production` - Environnement de production  
+- `monitoring` - Outils de supervision
 
 ---
 

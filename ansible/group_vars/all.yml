@@ -1,0 +1,29 @@
+---
+# Variables globales pour le projet Raspberry Pi VPN AP + K3s
+
+# Configuration Wi-Fi
+wifi_ssid: "{{ vault_wifi_ssid }}"
+wifi_passphrase: "{{ vault_wifi_passphrase}}"
+
+# Variables VPN (à remplacer dans vars/secrets.yml)
+vpn_username: "{{ vault_vpn_username }}"
+vpn_password: "{{ vault_vpn_password }}"
+
+# Configuration réseau
+wan_interface: "eth0"
+wan_ip: "192.168.1.1"
+wan_gateway: "192.168.1.254"
+wan_dns: "8.8.8.8 1.1.1.1"
+
+ap_interface: "wlan0" 
+ap_ip: "10.0.0.1"
+ap_network: "10.0.0.0/24"
+ap_dhcp_range: "10.0.0.10,10.0.0.100"
+
+# Configuration K3s
+k3s_version: "stable"
+k3s_node_name: "rpi-k3s-master"
+
+# Exemple de variables pour le vault (à chiffrer dans secrets.yml)
+# vault_vpn_username: "votre_username_nordvpn"
+# vault_vpn_password: "votre_password_nordvpn"

@@ -1,0 +1,206 @@
+---
+# K3s installation and configuration for Raspberry Pi VPN Access Point
+
+# Prérequis : Activer les cgroups memory pour K3s
+- name: Check if cgroups memory is already enabled
+  shell: cat /boot/firmware/cmdline.txt
+  register: cmdline_content
+  changed_when: false
+
+- name: Enable cgroups memory in boot cmdline
+  shell: |
+    if ! grep -q "cgroup_memory=1 cgroup_enable=memory" /boot/firmware/cmdline.txt; then
+      sed -i 's/$/ cgroup_memory=1 cgroup_enable=memory/' /boot/firmware/cmdline.txt
+      echo "cgroups_updated"
+    else
+      echo "cgroups_already_enabled"
+    fi
+  register: cgroups_result
+  changed_when: cgroups_result.stdout == "cgroups_updated"
+
+- name: Reboot if cgroups were updated
+  reboot:
+    msg: "Rebooting to enable memory cgroups for K3s"
+    reboot_timeout: 300
+  when: cgroups_result.changed
+
+- name: Verify cgroups are properly configured after reboot
+  shell: |
+    if [ -d "/sys/fs/cgroup/memory" ] || [ -f "/sys/fs/cgroup/cgroup.controllers" ]; then
+      echo "cgroups_available"
+    else
+      echo "cgroups_missing"
+    fi
+  register: cgroups_check
+  failed_when: cgroups_check.stdout == "cgroups_missing"
+
+- name: Display cgroups status
+  debug:
+    msg: "✅ Memory cgroups are properly configured"
+  when: cgroups_check.stdout == "cgroups_available"
+
+- name: Download K3s installer
+  get_url:
+    url: https://get.k3s.io
+    dest: /tmp/k3s-install.sh
+    mode: '0755'
+
+- name: Install K3s with secure configuration
+  environment:
+    K3S_KUBECONFIG_MODE: "644"
+    INSTALL_K3S_EXEC: >-
+      --disable=traefik
+      --disable=servicelb
+      --disable=local-storage
+      --bind-address=10.0.0.1
+      --advertise-address=10.0.0.1
+      --node-ip=10.0.0.1
+      --cluster-cidr=10.42.0.0/16
+      --service-cidr=10.43.0.0/16
+      --cluster-dns=10.43.0.10
+      --flannel-iface=wlan0
+      --write-kubeconfig-mode=644
+  shell: /tmp/k3s-install.sh
+  args:
+    creates: /usr/local/bin/k3s
+
+- name: Wait for K3s to be ready
+  wait_for:
+    port: 6443
+    host: 10.0.0.1
+    delay: 10
+    timeout: 300
+
+- name: Create k3s configuration directory for root
+  file:
+    path: /root/.kube
+    state: directory
+    mode: '0700'
+
+- name: Copy kubeconfig to root user
+  copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: /root/.kube/config
+    remote_src: yes
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Create k3s configuration directory for pi user
+  file:
+    path: /home/{{ ansible_user }}/.kube
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0700'
+
+- name: Copy kubeconfig to pi user
+  copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: /home/{{ ansible_user }}/.kube/config
+    remote_src: yes
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0600'
+
+- name: Update kubeconfig server URL for pi user
+  replace:
+    path: /home/{{ ansible_user }}/.kube/config
+    regexp: 'https://127.0.0.1:6443'
+    replace: 'https://10.0.0.1:6443'
+
+- name: Update kubeconfig server URL for root user
+  replace:
+    path: /root/.kube/config
+    regexp: 'https://127.0.0.1:6443'
+    replace: 'https://10.0.0.1:6443'
+
+- name: Create k3s firewall rules
+  copy:
+    dest: /etc/iptables/k3s-rules.v4
+    content: |
+      # K3s specific firewall rules
+      # Allow K3s API server only from VPN network (10.0.0.0/24)
+      -A INPUT -s 10.0.0.0/24 -p tcp --dport 6443 -j ACCEPT
+      # Block K3s API server from domestic network (192.168.1.0/24)
+      -A INPUT -s 192.168.1.0/24 -p tcp --dport 6443 -j DROP
+      # Allow kubelet metrics only from VPN network
+      -A INPUT -s 10.0.0.0/24 -p tcp --dport 10250 -j ACCEPT
+      -A INPUT -s 192.168.1.0/24 -p tcp --dport 10250 -j DROP
+      # Allow NodePort services only from VPN network (30000-32767)
+      -A INPUT -s 10.0.0.0/24 -p tcp --dport 30000:32767 -j ACCEPT
+      -A INPUT -s 192.168.1.0/24 -p tcp --dport 30000:32767 -j DROP
+      # Allow flannel VXLAN traffic within cluster
+      -A INPUT -s 10.42.0.0/16 -p udp --dport 8472 -j ACCEPT
+      # Allow cluster internal communication
+      -A INPUT -s 10.43.0.0/16 -j ACCEPT
+
+- name: Enable and start K3s service
+  systemd:
+    name: k3s
+    enabled: yes
+    state: started
+
+- name: Create kubectl alias for pi user
+  lineinfile:
+    path: /home/{{ ansible_user }}/.bashrc
+    line: "alias k='kubectl'"
+    create: yes
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+- name: Add kubeconfig environment variable for pi user
+  lineinfile:
+    path: /home/{{ ansible_user }}/.bashrc
+    line: "export KUBECONFIG=/home/{{ ansible_user }}/.kube/config"
+    create: yes
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+- name: Copy K3s management script
+  copy:
+    src: k3s-manage.sh
+    dest: /usr/local/bin/k3s-manage
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Install helm (for Pulumi Kubernetes deployments)
+  get_url:
+    url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    dest: /tmp/get-helm.sh
+    mode: '0755'
+
+- name: Execute helm installer
+  shell: /tmp/get-helm.sh
+  args:
+    creates: /usr/local/bin/helm
+
+- name: Create namespace for pulumi deployments
+  k8s:
+    name: pulumi-system
+    api_version: v1
+    kind: Namespace
+    state: present
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+
+- name: Display cluster info
+  debug:
+    msg: |
+      K3s cluster is now ready!
+      
+      API Server: https://10.0.0.1:6443
+      Accessible only from VPN network: 10.0.0.0/24
+      Blocked from domestic network: 192.168.1.0/24
+      
+      To connect from Pulumi:
+      - Use server: https://10.0.0.1:6443
+      - Copy kubeconfig from: /home/{{ ansible_user }}/.kube/config
+      
+      Useful commands on the Pi:
+      - kubectl get nodes
+      - kubectl get pods --all-namespaces
+      - helm list --all-namespaces
+
+- name: Run post-installation tasks
+  include_tasks: post-install.yml

@@ -39,3 +39,5 @@ Pulumi.*.yaml
 *.retry
 # Inventory file
 ansible/inventory/hosts
+# Environment variables (contains vault password)
+ansible/.env

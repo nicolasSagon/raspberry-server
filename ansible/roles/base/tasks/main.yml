@@ -1,15 +1,19 @@
 - name: Update APT cache
   apt:
     update_cache: yes
+    cache_valid_time: 3600
 
 - name: Upgrade all packages
   apt:
     upgrade: dist
+    autoremove: yes
+    autoclean: yes
 
 - name: Install base packages
   apt:
     name:
       - curl
+      - wget
       - git
       - vim
       - unzip
@@ -21,7 +25,25 @@
       - dnsmasq
       - wireless-tools
       - dhcpcd5
+      - python3-pip
+      - python3-setuptools
+      - apt-transport-https
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - python3-kubernetes
+      - python3-yaml
     state: present
+
+- name: Verify Python Kubernetes library installation
+  command: python3 -c "import kubernetes; print('Kubernetes library OK')"
+  register: k8s_check
+  changed_when: false
+  failed_when: false
+
+- name: Display Python library status
+  debug:
+    msg: "{{ k8s_check.stdout if k8s_check.rc == 0 else 'Warning: Kubernetes library not available' }}"
 
 - name: Create a unified dhcpcd.conf for all interfaces
   copy:
