@@ -7,4 +7,5 @@
     - wifi_ap
     - vpn
     - firewall
+    - docker
     - k3s
